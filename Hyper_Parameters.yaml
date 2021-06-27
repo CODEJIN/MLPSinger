@@ -53,7 +53,6 @@ Train:
         ]
 
 Inference_Batch_Size: 16
-Inference_Text_Path: './Inference_Text.txt'
 Inference_Path: '/data/results/MLPSinger/Inference'
 Checkpoint_Path: '/data/results/MLPSinger/Checkpoint'
 Log_Path: '/data/results/MLPSinger/Log'

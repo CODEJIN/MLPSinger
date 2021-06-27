@@ -283,7 +283,7 @@ class Trainer:
 
         audios = []
         for prediction in predictions:
-            prediction = spectral_de_normalize_torch(prediction.transpose(0, 1)).cpu().numpy()
+            prediction = spectral_de_normalize_torch(prediction.T).cpu().numpy()
             audio = griffinlim(prediction)
             audios.append(audio)
         audios = [(audio / np.abs(audio).max() * 32767.5).astype(np.int16) for audio in audios]
@@ -307,7 +307,7 @@ class Trainer:
             title = 'Text: {}'.format(text if len(text) < 90 else text[:90] + '…')
             new_Figure = plt.figure(figsize=(20, 5 * 1), dpi=100)
             plt.subplot2grid((1, 1), (0, 0))
-            plt.imshow(prediction, aspect='auto', origin='lower')
+            plt.imshow(prediction.T, aspect='auto', origin='lower')
             plt.title('Feature    {}'.format(title))
             plt.colorbar()            
             plt.tight_layout()

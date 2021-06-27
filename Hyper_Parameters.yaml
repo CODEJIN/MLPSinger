@@ -30,9 +30,9 @@ Train:
         Path: '/data/22K.Music/Eval' # '/datasets/22K.TTS/Eval'
         Metadata_File: 'METADATA.PICKLE'
     Num_Workers: 2
-    Batch_Size: 64
+    Batch_Size: 48
     Learning_Rate:
-        Initial: 2.0e-4
+        Initial: 1.0e-3
         Base: 4000
     ADAM:
         Beta1: 0.9
@@ -59,5 +59,5 @@ Checkpoint_Path: '/data/results/MLPSinger/Checkpoint'
 Log_Path: '/data/results/MLPSinger/Log'
 
 Use_Mixed_Precision: true
-Use_Multi_GPU: false
-Device: '0'
+Use_Multi_GPU: true
+Device: '0,1,2,3,4,5,6,7'

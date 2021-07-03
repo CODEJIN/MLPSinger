@@ -76,6 +76,7 @@ class Trainer:
         token_dict = yaml.load(open(self.hp.Token_Path), Loader=yaml.Loader)
 
         train_dataset = Dataset(
+            feature_type= self.hp.Feature_Type,
             token_dict= token_dict,
             pattern_path= self.hp.Train.Train_Pattern.Path,
             metadata_file= self.hp.Train.Train_Pattern.Metadata_File,
@@ -83,6 +84,7 @@ class Trainer:
             consonant_duration= self.hp.Duration.Consonant_Duration
             )
         dev_dataset = Dataset(
+            feature_type= self.hp.Feature_Type,
             token_dict= token_dict,
             pattern_path= self.hp.Train.Eval_Pattern.Path,
             metadata_file= self.hp.Train.Eval_Pattern.Metadata_File,
@@ -149,6 +151,9 @@ class Trainer:
             optimizer= self.optimizer,
             base= self.hp.Train.Learning_Rate.Base
             )
+
+        if self.hp.Feature_Type == 'Mel':
+            self.vocoder = torch.jit.load('hifigan_jit_sing_0273.pts', map_location='cpu').to(self.device)
 
         self.scaler = torch.cuda.amp.GradScaler(enabled= self.hp.Use_Mixed_Precision)
 
@@ -282,9 +287,12 @@ class Trainer:
             )
 
         audios = []
-        for prediction in predictions:
-            prediction = spectral_de_normalize_torch(prediction.T).cpu().numpy()
-            audio = griffinlim(prediction)
+        for prediction in predictions.transpose(2, 1):
+            if self.hp.Feature_Type == 'Mel':
+                audio = self.vocoder(prediction.unsqueeze(0)).cpu().numpy()
+            elif self.hp.Feature_Type == 'Spectrogram':
+                prediction = spectral_de_normalize_torch(prediction).cpu().numpy()
+                audio = griffinlim(prediction)
             audios.append(audio)
         audios = [(audio / np.abs(audio).max() * 32767.5).astype(np.int16) for audio in audios]
 

@@ -8,6 +8,13 @@ class MLPSinger(torch.nn.Module):
         super().__init__()
         self.hp = hyper_parameters
         encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size
+        
+        if self.hp.Feature_Type == 'Spectrogram':
+            feature_size = self.hp.Sound.N_FFT // 2 + 1
+        elif self.hp.Feature_Type == 'Mel':
+            feature_size = self.hp.Sound.Mel_Dim
+        else:
+            raise ValueError('Unknown feature type: {}'.format(self.hp.Feature_Type))
 
         self.encoder = Encoder(self.hp)
         
@@ -23,7 +30,7 @@ class MLPSinger(torch.nn.Module):
 
         self.projection = torch.nn.Linear(
             in_features= encoding_size,
-            out_features= self.hp.Sound.N_FFT // 2 + 1
+            out_features= feature_size
             )
 
     def forward(

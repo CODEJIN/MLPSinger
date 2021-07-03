@@ -16,7 +16,7 @@ Duration:
     Equality: False
     Consonant_Duration: 3   # This is only used when Equality is False.
 
-Feature_Type: 'Spectrogram'
+Feature_Type: 'Mel'
 
 Encoder:
     Token_Size: 512
@@ -26,13 +26,13 @@ Mixer:
     Stack: 16
     Dropout_Rate: 0.5
 
-Token_Path: '/data/22K.Music/Token.yaml' # '/datasets/22K.TTS/Token.yaml'
+Token_Path: '/data/22K.Music.Mel/Token.yaml' # '/datasets/22K.TTS/Token.yaml'
 Train:
     Train_Pattern:
-        Path: '/data/22K.Music/Train' # '/datasets/22K.TTS/Train'
+        Path: '/data/22K.Music.Mel/Train' # '/datasets/22K.TTS/Train'
         Metadata_File: 'METADATA.PICKLE'
     Eval_Pattern:
-        Path: '/data/22K.Music/Eval' # '/datasets/22K.TTS/Eval'
+        Path: '/data/22K.Music.Mel/Eval' # '/datasets/22K.TTS/Eval'
         Metadata_File: 'METADATA.PICKLE'
     Num_Workers: 2
     Batch_Size: 48
@@ -58,9 +58,9 @@ Train:
         ]
 
 Inference_Batch_Size: 16
-Inference_Path: '/data/results/MLPSinger/Inference'
-Checkpoint_Path: '/data/results/MLPSinger/Checkpoint'
-Log_Path: '/data/results/MLPSinger/Log'
+Inference_Path: '/data/results/MLPSinger/MLPSinger.Mel/Inference'
+Checkpoint_Path: '/data/results/MLPSinger/MLPSinger.Mel/Checkpoint'
+Log_Path: '/data/results/MLPSinger/MLPSinger.Mel/Log'
 
 Use_Mixed_Precision: true
 Use_Multi_GPU: true

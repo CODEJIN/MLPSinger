@@ -10,9 +10,8 @@ Tolstikhin, I., Houlsby, N., Kolesnikov, A., Beyer, L., Zhai, X., Unterthiner, T
 # Structure
 * Structure is based on the MLP Singer.
 * I changed several hyper parameters and data type
-    * Feature type is changed from mel to spectrogram.
+    * One of mel or spectrogram is can be selected as a feature type.
     * Token type is changed from phoneme to grapheme.
-
 
 # Used dataset
 * Code verification was conducted through a private Korean dataset.
@@ -40,7 +39,10 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
     * Equality set the strategy about syllable to grapheme.
         * When `True`, onset, nucleus, and coda have same length or ±1 difference.
         * When `False`, onset and coda have Consonant_Duration length, and nucleus has duration - 2 * Consonant_Duration.
-    
+
+* Feature_Type
+    * Setting the feature type (`Mel` or `Spectrogram`).
+
 * Encoder
     * Setting the encoder(embedding).
 
@@ -69,7 +71,7 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
     * Setting using multi gpu
     * By the nvcc problem, Only linux supports this option.
     * If this is `True`, device parameter is also multiple like '0,1,2,3'.
-    * And training command is also changed: please check  'multi_gpu.sh'
+    * And you have to change the training command also: please check  [multi_gpu.sh](./multi_gpu.sh).
 
 * Device
     * Setting which GPU devices are used in multi-GPU enviornment.
@@ -108,4 +110,4 @@ python Train.py -hp <path> -s <int>
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 OMP_NUM_THREADS=32 python -m torch.distributed.launch --nproc_per_node=8 Train.py --hyper_parameters Hyper_Parameters.yaml --port 54322
 ```
 
-* I recommend to check the `multi_gpu.sh`.
+* I recommend to check the [multi_gpu.sh](./multi_gpu.sh).

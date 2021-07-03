@@ -4,7 +4,7 @@ from tqdm import tqdm
 from argparse import Namespace  # for type
 import torch
 
-from meldataset import spectrogram
+from meldataset import mel_spectrogram, spectrogram
 from Arg_Parser import Recursive_Parse
 
 def Pattern_Generate(
@@ -21,7 +21,7 @@ def Pattern_Generate(
             if os.path.splitext(file)[1] != '.wav':
                 continue
             wav_path = os.path.join(root, file).replace('\\', '/')
-            midi_path = wav_path.replace('vox.wav', 'midi.mid')
+            midi_path = wav_path.replace('.wav', '.mid')
             paths.append((wav_path, midi_path))
 
     if eval_index >= len(paths):
@@ -100,6 +100,17 @@ def Pattern_Generate(
             win_size= hyper_paramters.Sound.Frame_Length,
             center= False
             ).squeeze(0).T.numpy()
+        mel = mel_spectrogram(
+            y= torch.from_numpy(audio).float().unsqueeze(0),
+            n_fft= hyper_paramters.Sound.N_FFT,
+            num_mels= hyper_paramters.Sound.Mel_Dim,
+            sampling_rate= hyper_paramters.Sound.Sample_Rate,
+            hop_size= hyper_paramters.Sound.Frame_Shift,
+            win_size= hyper_paramters.Sound.Frame_Length,
+            fmin= hyper_paramters.Sound.Mel_F_Min,
+            fmax= hyper_paramters.Sound.Mel_F_Max,
+            center= False
+            ).squeeze(0).T.numpy()
 
         pattern_index = 0
         for start_index in tqdm(range(0, len(music)), desc= os.path.basename(wav_path)):
@@ -113,12 +124,14 @@ def Pattern_Generate(
 
                 audio_sample = audio[music_sample[0][0] * hyper_paramters.Sound.Frame_Shift:(music_sample[-1][0] + music_sample[-1][1]) * hyper_paramters.Sound.Frame_Shift]
                 spect_sample = spect[music_sample[0][0]:music_sample[-1][0] + music_sample[-1][1]]
+                mel_sample = mel[music_sample[0][0]:music_sample[-1][0] + music_sample[-1][1]]
                 
                 _, duration_sample, text_sample, note_sample = zip(*music_sample)
 
                 pattern = {
                     'Audio': audio_sample.astype(np.float32),
                     'Spectrogram': spect_sample.astype(np.float32),
+                    'Mel': mel_sample.astype(np.float32),
                     'Duration': duration_sample,
                     'Text': text_sample,
                     'Note': note_sample,
@@ -136,7 +149,7 @@ def Pattern_Generate(
                 pickle.dump(
                     pattern,
                     open(pattern_path, 'wb'),
-                    protocol=4
+                    protocol= 4
                     )
                 pattern_index += 1
 
@@ -168,12 +181,14 @@ def Metadata_Generate(
 
     new_metadata_dict = {
         'N_FFT': hyper_parameters.Sound.N_FFT,
+        'Mel_Dim': hyper_parameters.Sound.Mel_Dim,
         'Frame_Shift': hyper_parameters.Sound.Frame_Shift,
         'Frame_Length': hyper_parameters.Sound.Frame_Length,
         'Sample_Rate': hyper_parameters.Sound.Sample_Rate,
         'File_List': [],
         'Audio_Length_Dict': {},
         'Spectrogram_Length_Dict': {},
+        'Mel_Length_Dict': {},
         'Music_Length_Dict': {},
         }
 
@@ -190,11 +205,12 @@ def Metadata_Generate(
             try:
                 if not all([
                     key in pattern_dict.keys()
-                    for key in ('Audio', 'Spectrogram', 'Duration', 'Text', 'Note', 'Singer', 'Dataset')
+                    for key in ('Audio', 'Spectrogram', 'Mel', 'Duration', 'Text', 'Note', 'Singer', 'Dataset')
                     ]):
                     continue
                 new_metadata_dict['Audio_Length_Dict'][file] = pattern_dict['Audio'].shape[0]
                 new_metadata_dict['Spectrogram_Length_Dict'][file] = pattern_dict['Spectrogram'].shape[0]
+                new_metadata_dict['Mel_Length_Dict'][file] = pattern_dict['Mel'].shape[0]
                 new_metadata_dict['Music_Length_Dict'][file] = len(pattern_dict['Duration'])
                 new_metadata_dict['File_List'].append(file)
             except Exception as e:
@@ -225,4 +241,5 @@ if __name__ == "__main__":
     Metadata_Generate(hp, False)
     Metadata_Generate(hp, True)
 
-    # python Pattern_Generator.py -hp Hyper_Parameters.yaml -d "E:/Pattern/Sing/108곡 시작 끝 Note 수정 작업 파일" -eval 107
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -d "E:/Pattern/Sing/108곡 시작 끝 Note 수정 작업 파일" -eval 107
+# python Pattern_Generator_.py -hp Hyper_Parameters_.yaml -d "/data/Music" -eval 107

@@ -66,6 +66,7 @@ def Duration_Stack(durations: list, max_duration: int):
 class Dataset(torch.utils.data.Dataset):
     def __init__(
         self,
+        feature_type: str,
         token_dict: Dict[str, int],
         pattern_path: str,
         metadata_file: str,
@@ -73,6 +74,7 @@ class Dataset(torch.utils.data.Dataset):
         consonant_duration: int= 3
         ):
         super(Dataset, self).__init__()
+        self.feature_type = feature_type
         self.token_dict = token_dict
         self.pattern_path = pattern_path
         self.equality_duration = equality_duration
@@ -109,8 +111,8 @@ class Dataset(torch.utils.data.Dataset):
                         duration - self.consonant_duration * 2, # nucleus
                         self.consonant_duration # coda
                         ])
-        
-        return Text_to_Token(texts, self.token_dict), notes, durations, pattern_dict['Spectrogram']
+
+        return Text_to_Token(texts, self.token_dict), notes, durations, pattern_dict[self.feature_type]
 
     def __len__(self):
         return len(self.patterns)

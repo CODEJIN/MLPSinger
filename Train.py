@@ -37,12 +37,12 @@ logging.basicConfig(
 
 class Trainer:
     def __init__(self, hp_path, steps= 0):
-        self.hp_Path = hp_path
+        self.hp_path = hp_path
         self.gpu_id = int(os.getenv('RANK', '0'))
         self.num_gpus = int(os.getenv("WORLD_SIZE", '1'))
         
         self.hp = Recursive_Parse(yaml.load(
-            open(self.hp_Path, encoding='utf-8'),
+            open(self.hp_path, encoding='utf-8'),
             Loader=yaml.Loader
             ))
 
@@ -396,8 +396,9 @@ class Trainer:
     def Train(self):
         hp_path = os.path.join(self.hp.Checkpoint_Path, 'Hyper_Parameters.yaml').replace('\\', '/')
         if not os.path.exists(hp_path):
+            from shutil import copyfile
             os.makedirs(self.hp.Checkpoint_Path, exist_ok= True)
-            yaml.dump(self.hp, open(hp_path, 'w'))
+            copyfile(self.hp_path, hp_path)
 
         if self.steps == 0:
             self.Evaluation_Epoch()

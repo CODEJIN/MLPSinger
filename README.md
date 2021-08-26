@@ -14,10 +14,7 @@ Tolstikhin, I., Houlsby, N., Kolesnikov, A., Beyer, L., Zhai, X., Unterthiner, T
     * Token type is changed from phoneme to grapheme.
 
 # Used dataset
-* Code verification was conducted through a private Korean dataset.
-    * Thus, current [Pattern_Generator.py](Pattern_Generator.py) and [Datasets.py](Datasets.py) are based on the Korean.
-* TODO: Scripting for the offical dataset.
-    * [CSD Dataset](https://github.com/emotiontts/emotiontts_open_db/tree/master/Dataset/CSD)
+* [CSD Dataset](https://github.com/emotiontts/emotiontts_open_db/tree/master/Dataset/CSD)
 
 
 # Hyper parameters
@@ -79,7 +76,17 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in [H
 
 # Generate pattern
 
-* Current version does not support any open source dataset.
+```
+python Pattern_Generate.py [parameters]
+```
+## Parameters
+* -csd
+    * The path of children's song dataset
+* -step
+    * The note step that is explored when generating patterns.
+    * The smaller step is, the more patterns are created in one song.
+* -hp
+    * The path of hyperparameter.
     
 # Inference file path while training for verification.
 

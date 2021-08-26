@@ -12,7 +12,7 @@ from Arg_Parser import Recursive_Parse
 def CSD(
     hyper_paramters: Namespace,
     dataset_path: str,
-    mel_step: int= 10
+    note_step: int= 10
     ):
     min_duration, max_duration = math.inf, -math.inf
     min_note, max_note = math.inf, -math.inf
@@ -59,7 +59,7 @@ def CSD(
         pattern_min_duration, pattern_max_duration = Pattern_File_Generate(
             music= music,
             audio= audio,
-            mel_step= mel_step,
+            note_step= note_step,
             music_index= index,
             singer= 'CSD',
             dataset= 'CSD',
@@ -92,7 +92,7 @@ def Convert_Mel_Based_Music(
 def Pattern_File_Generate(
     music: List[Tuple[int, int, str, int]], # [start_point, end_point, lyric, note]
     audio: np.array,
-    mel_step: int,
+    note_step: int,
     singer: str,
     dataset: str,
     music_index: int,
@@ -123,7 +123,7 @@ def Pattern_File_Generate(
 
     pattern_index = 0
     for start_index in tqdm(range(0, len(music)), desc= description):
-        for end_index in range(start_index + 1, len(music), mel_step):
+        for end_index in range(start_index + 1, len(music), note_step):
             music_sample = music[start_index:end_index]
             sample_length = music_sample[-1][0] + music_sample[-1][1] - music_sample[0][0]
             if sample_length < hyper_paramters.Duration.Min:
@@ -245,7 +245,7 @@ def Metadata_Generate(
 if __name__ == "__main__":
     argParser = argparse.ArgumentParser()
     argParser.add_argument("-csd", "--csd_path", required= True)
-    argParser.add_argument("-step", "--mel_step", default= 10, type= int)
+    argParser.add_argument("-step", "--note_step", default= 10, type= int)
     argParser.add_argument("-hp", "--hyper_paramters", required= True)
     args = argParser.parse_args()
 
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     CSD(
         hyper_paramters= hp,
         dataset_path= args.csd_path,
-        mel_step= args.mel_step
+        note_step= args.note_step
         )
     Metadata_Generate(hp, False)
     Metadata_Generate(hp, True)

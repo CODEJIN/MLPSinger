@@ -26,13 +26,14 @@ Mixer:
     Stack: 16
     Dropout_Rate: 0.5
 
-Token_Path: '/data/22K.Music/Token.yaml' # '/datasets/22K.TTS/Token.yaml'
+Token_Path: 'E:/22K.Music/Token.yaml' # '/data/22K.Music/Token.yaml'
+Singer_Info_Path: 'E:/22K.Music/Singer.yaml' #'/data/22K.Music/Singer.yaml'
 Train:
     Train_Pattern:
-        Path: '/data/22K.Music/Train' # '/datasets/22K.TTS/Train'
+        Path: 'E:/22K.Music/Train' # '/data/22K.Music/Train'
         Metadata_File: 'METADATA.PICKLE'
     Eval_Pattern:
-        Path: '/data/22K.Music/Eval' # '/datasets/22K.TTS/Eval'
+        Path: 'E:/22K.Music/Eval' # '/data/22K.Music/Eval'
         Metadata_File: 'METADATA.PICKLE'
     Num_Workers: 2
     Batch_Size: 48

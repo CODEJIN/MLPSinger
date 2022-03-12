@@ -1,6 +1,5 @@
-import torch
 import numpy as np
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import matplotlib
 
@@ -40,6 +39,19 @@ class Logger(SummaryWriter):
             data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             plt.close()
             self.add_image(tag= tag, img_tensor= data, global_step= global_step, walltime= walltime, dataformats= 'HWC')
+        self.flush()
+
+    def add_audio_dict(self, audio_dict, global_step, walltime= None):
+        for tag, (data, sample_rate) in audio_dict.items():
+            if data.ndim == 1:
+                data = np.expand_dims(data, 0)
+            self.add_audio(
+                tag= tag,
+                snd_tensor= data,
+                global_step= global_step,
+                sample_rate= sample_rate,
+                walltime= walltime
+                )
         self.flush()
 
     def add_histogram_model(self, model, model_label= None, global_step=None, bins='tensorflow', walltime=None, max_bins=None, delete_keywords= []):

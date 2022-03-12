@@ -3,7 +3,7 @@ from torch._C import device
 os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'    # This is ot prevent to be called Fortran Ctrl+C crash in Windows.
 import torch
 import numpy as np
-import logging, yaml, os, sys, argparse, math
+import logging, yaml, os, sys, argparse, math, wandb
 from tqdm import tqdm
 from collections import defaultdict
 import matplotlib
@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from librosa import griffinlim
 from scipy.io import wavfile
 
-from Modules import MLPSinger
+from Modules.Modules import MLPSinger
 from Datasets import Dataset, Inference_Dataset, Collater, Inference_Collater
 from Radam import RAdam
 from Noam_Scheduler import Modified_Noam_Scheduler
@@ -20,7 +20,7 @@ from Logger import Logger
 
 from meldataset import spectral_de_normalize_torch
 from distributed import init_distributed, apply_gradient_allreduce, reduce_tensor
-from Arg_Parser import Recursive_Parse
+from Arg_Parser import Recursive_Parse, To_Non_Recursive_Dict
 
 import matplotlib as mpl
 # 유니코드 깨짐현상 해결
@@ -71,41 +71,72 @@ class Trainer:
                 'Train': Logger(os.path.join(self.hp.Log_Path, 'Train')),
                 'Evaluation': Logger(os.path.join(self.hp.Log_Path, 'Evaluation')),
                 }
+            
+            if self.hp.Weights_and_Biases.Use:
+                wandb.init(
+                    project= self.hp.Weights_and_Biases.Project,
+                    entity= self.hp.Weights_and_Biases.Entity,
+                    name= self.hp.Weights_and_Biases.Name,
+                    config= To_Non_Recursive_Dict(self.hp)
+                    )
+                wandb.watch(self.model)
 
     def Dataset_Generate(self):
         token_dict = yaml.load(open(self.hp.Token_Path), Loader=yaml.Loader)
+        log_f0_info_dict = yaml.load(open(self.hp.Log_F0_Info_Path), Loader=yaml.Loader)
+        energy_info_dict = yaml.load(open(self.hp.Energy_Info_Path), Loader=yaml.Loader)
+        singer_info_dict = yaml.load(open(self.hp.Singer_Info_Path), Loader=yaml.Loader)
+        genre_info_dict = yaml.load(open(self.hp.Genre_Info_Path), Loader=yaml.Loader)
 
         train_dataset = Dataset(
-            feature_type= self.hp.Feature_Type,
             token_dict= token_dict,
+            log_f0_info_dict= log_f0_info_dict,
+            energy_info_dict= energy_info_dict,
+            singer_info_dict= singer_info_dict,
+            genre_info_dict= genre_info_dict,
             pattern_path= self.hp.Train.Train_Pattern.Path,
             metadata_file= self.hp.Train.Train_Pattern.Metadata_File,
-            equality_duration= self.hp.Duration.Equality,
-            consonant_duration= self.hp.Duration.Consonant_Duration
-            )
-        dev_dataset = Dataset(
             feature_type= self.hp.Feature_Type,
+            accumulated_dataset_epoch= self.hp.Train.Train_Pattern.Accumulated_Dataset_Epoch,
+            augmentation_ratio= self.hp.Train.Train_Pattern.Augmentation_Ratio
+            )
+        eval_dataset = Dataset(
             token_dict= token_dict,
+            log_f0_info_dict= log_f0_info_dict,
+            energy_info_dict= energy_info_dict,
+            singer_info_dict= singer_info_dict,
+            genre_info_dict= genre_info_dict,
             pattern_path= self.hp.Train.Eval_Pattern.Path,
             metadata_file= self.hp.Train.Eval_Pattern.Metadata_File,
-            equality_duration= self.hp.Duration.Equality,
-            consonant_duration= self.hp.Duration.Consonant_Duration
+            feature_type= self.hp.Feature_Type,
+            accumulated_dataset_epoch= self.hp.Train.Eval_Pattern.Accumulated_Dataset_Epoch,
             )
         inference_dataset = Inference_Dataset(
             token_dict= token_dict,
-            max_duration= self.hp.Duration.Max,
+            singer_info_dict= singer_info_dict,
+            genre_info_dict= genre_info_dict,
             pattern_paths= self.hp.Train.Inference_Pattern_in_Train,
+            singers= self.hp.Train.Inference_Singer_in_Train,
+            genres= self.hp.Train.Inference_Genre_in_Train,
+            sample_rate= self.hp.Sound.Sample_Rate,
+            frame_shift= self.hp.Sound.Frame_Shift,
             equality_duration= self.hp.Duration.Equality,
             consonant_duration= self.hp.Duration.Consonant_Duration
             )
 
         if self.gpu_id == 0:
-            logging.info('The number of train patterns = {}.'.format(len(train_dataset)))
-            logging.info('The number of development patterns = {}.'.format(len(dev_dataset)))
+            logging.info('The number of train patterns = {}.'.format(len(train_dataset) // self.hp.Train.Train_Pattern.Accumulated_Dataset_Epoch))
+            logging.info('The number of development patterns = {}.'.format(len(eval_dataset)))
             logging.info('The number of inference patterns = {}.'.format(len(inference_dataset)))
 
-        collater = Collater(token_dict= token_dict, max_duration= self.hp.Duration.Max)
-        inference_collater = Inference_Collater(token_dict= token_dict, max_duration= self.hp.Duration.Max)
+        collater = Collater(
+            token_dict= token_dict,
+            pattern_length= self.hp.Train.Pattern_Length
+            )
+        inference_collater = Inference_Collater(
+            token_dict= token_dict,
+            pattern_length= self.hp.Train.Pattern_Length
+            )
 
         self.dataloader_dict = {}
         self.dataloader_dict['Train'] = torch.utils.data.DataLoader(
@@ -118,11 +149,11 @@ class Trainer:
             num_workers= self.hp.Train.Num_Workers,
             pin_memory= True
             )
-        self.dataloader_dict['Dev'] = torch.utils.data.DataLoader(
-            dataset= dev_dataset,
-            sampler= torch.utils.data.DistributedSampler(dev_dataset, shuffle= True) \
+        self.dataloader_dict['Eval'] = torch.utils.data.DataLoader(
+            dataset= eval_dataset,
+            sampler= torch.utils.data.DistributedSampler(eval_dataset, shuffle= True) \
                      if self.num_gpus > 1 else \
-                     torch.utils.data.RandomSampler(dev_dataset),
+                     torch.utils.data.RandomSampler(eval_dataset),
             collate_fn= collater,
             batch_size= self.hp.Train.Batch_Size,
             num_workers= self.hp.Train.Num_Workers,
@@ -139,7 +170,7 @@ class Trainer:
 
     def Model_Generate(self):
         self.model = MLPSinger(self.hp).to(self.device)
-        self.criterion = torch.nn.MSELoss().to(self.device)
+        self.criterion = torch.nn.L1Loss().to(self.device)
         self.optimizer = RAdam(
             params= self.model.parameters(),
             lr= self.hp.Train.Learning_Rate.Initial,
@@ -153,25 +184,23 @@ class Trainer:
             )
 
         if self.hp.Feature_Type == 'Mel':
-            self.vocoder = torch.jit.load('hifigan_jit_sing_0273.pts', map_location='cpu').to(self.device)
+            self.vocoder = torch.jit.load('vocgan_sing_mzf_22k_403.pts', map_location='cpu').to(self.device)
 
         self.scaler = torch.cuda.amp.GradScaler(enabled= self.hp.Use_Mixed_Precision)
 
         if self.gpu_id == 0:
             logging.info(self.model)
 
-    def Train_Step(self, tokens, notes, durations, features):
+    def Train_Step(self, tokens, notes, features, log_f0s, energies, singers, genres):
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
         notes = notes.to(self.device, non_blocking=True)
-        durations = durations.to(self.device, non_blocking=True)
         features = features.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
             predictions = self.model(
                 tokens= tokens,
-                notes= notes,
-                durations= durations
+                notes= notes
                 )
 
             loss_dict['Loss'] = self.criterion(predictions, features)
@@ -196,8 +225,8 @@ class Trainer:
             self.scalar_dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
-        for tokens, notes, durations, features in self.dataloader_dict['Train']:
-            self.Train_Step(tokens, notes, durations, features)
+        for tokens, notes, features, log_f0s, energies, singers, genres in self.dataloader_dict['Train']:
+            self.Train_Step(tokens, notes, features, log_f0s, energies, singers, genres)
 
             if self.steps % self.hp.Train.Checkpoint_Save_Interval == 0:
                 self.Save_Checkpoint()
@@ -207,8 +236,17 @@ class Trainer:
                     tag: loss / self.hp.Train.Logging_Interval
                     for tag, loss in self.scalar_dict['Train'].items()
                     }
-                self.scalar_dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
+                self.scalar_dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()[0]
                 self.writer_dict['Train'].add_scalar_dict(self.scalar_dict['Train'], self.steps)
+                if self.hp.Weights_and_Biases.Use:
+                    wandb.log(
+                        data= {
+                            f'Train.{key}': value
+                            for key, value in self.scalar_dict['Train'].items()
+                            },
+                        step= self.steps,
+                        commit= self.steps % self.hp.Train.Evaluation_Interval != 0
+                        )
                 self.scalar_dict['Train'] = defaultdict(float)
 
             if self.steps % self.hp.Train.Evaluation_Interval == 0:
@@ -222,17 +260,15 @@ class Trainer:
 
 
     @torch.no_grad()
-    def Evaluation_Step(self, tokens, notes, durations, features):
+    def Evaluation_Step(self, tokens, notes, features, log_f0s, energies, singers, genres):
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
         notes = notes.to(self.device, non_blocking=True)
-        durations = durations.to(self.device, non_blocking=True)
         features = features.to(self.device, non_blocking=True)
 
         predictions = self.model(
             tokens= tokens,
-            notes= notes,
-            durations= durations
+            notes= notes
             )
 
         loss_dict['Loss'] = self.criterion(predictions, features)
@@ -248,12 +284,12 @@ class Trainer:
 
         self.model.eval()
 
-        for step, (tokens, notes, durations, features) in tqdm(
-            enumerate(self.dataloader_dict['Dev'], 1),
+        for step, (tokens, notes, features, log_f0s, energies, singers, genres) in tqdm(
+            enumerate(self.dataloader_dict['Eval'], 1),
             desc='[Evaluation]',
-            total= math.ceil(len(self.dataloader_dict['Dev'].dataset) / self.hp.Train.Batch_Size / self.num_gpus)
+            total= math.ceil(len(self.dataloader_dict['Eval'].dataset) / self.hp.Train.Batch_Size / self.num_gpus)
             ):
-            predictions = self.Evaluation_Step(tokens, notes, durations, features)
+            predictions = self.Evaluation_Step(tokens, notes, features, log_f0s, energies, singers, genres)
 
         if self.gpu_id == 0:
             self.scalar_dict['Evaluation'] = {
@@ -261,13 +297,60 @@ class Trainer:
                 for tag, loss in self.scalar_dict['Evaluation'].items()
                 }
             self.writer_dict['Evaluation'].add_scalar_dict(self.scalar_dict['Evaluation'], self.steps)
-            self.writer_dict['Evaluation'].add_histogram_model(self.model, 'MLPSinger', self.steps, delete_keywords=[])
+            self.writer_dict['Evaluation'].add_histogram_model(self.model, 'MLPSinger', self.steps, delete_keywords=['layer_Dict', 'layer'])
         
+            index = np.random.randint(0, tokens.size(0))
+                        
+            if self.hp.Feature_Type == 'Mel':
+                feature_audio = self.vocoder(
+                    ((features[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).unsqueeze(0).to(self.device)
+                    ).squeeze(0).cpu().numpy() / 32768.0
+                prediction_audio = self.vocoder(
+                    ((predictions[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).unsqueeze(0).to(self.device)
+                    ).squeeze(0).cpu().numpy() / 32768.0
+            elif self.hp.Feature_Type == 'Spectrogram':
+                feature_audio = griffinlim(spectral_de_normalize_torch((features[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).cpu().numpy())
+                prediction_audio = griffinlim(spectral_de_normalize_torch((predictions[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).cpu().numpy())
+
             image_dict = {
-                'Feature/Target': (features[-1].T.cpu().numpy(), None, 'auto', None),
-                'Feature/Prediction': (predictions[-1].T.cpu().numpy(), None, 'auto', None)
+                'Feature/Target': (features[index].cpu().numpy(), None, 'auto', None),
+                'Feature/Prediction': (predictions[index].cpu().numpy(), None, 'auto', None),
                 }
             self.writer_dict['Evaluation'].add_image_dict(image_dict, self.steps)
+
+            audio_dict = {
+                'Audio/Target': (feature_audio, self.hp.Sound.Sample_Rate),
+                'Audio/Prediction': (prediction_audio, self.hp.Sound.Sample_Rate),
+                }
+            self.writer_dict['Evaluation'].add_audio_dict(audio_dict, self.steps)
+
+            if self.hp.Weights_and_Biases.Use:
+                wandb.log(
+                    data= {
+                        f'Evaluation.{key}': value
+                        for key, value in self.scalar_dict['Evaluation'].items()
+                        },
+                    step= self.steps,
+                    commit= False
+                    )
+                wandb.log(
+                    data= {                        
+                        'Evaluation.Feature.Target': wandb.Image(features[index].cpu().numpy()),
+                        'Evaluation.Feature.Prediction': wandb.Image(predictions[index].cpu().numpy()),                        
+                        'Evaluation.Audio.Target': wandb.Audio(
+                            feature_audio,
+                            sample_rate= self.hp.Sound.Sample_Rate,
+                            caption= 'Target'
+                            ),
+                        'Evaluation.Audio.Prediction': wandb.Audio(
+                            prediction_audio,
+                            sample_rate= self.hp.Sound.Sample_Rate,
+                            caption= 'Prediction'
+                            ),
+                        },
+                    step= self.steps,
+                    commit= False
+                    )
 
         self.scalar_dict['Evaluation'] = defaultdict(float)
 
@@ -275,26 +358,34 @@ class Trainer:
 
 
     @torch.no_grad()
-    def Inference_Step(self, tokens, notes, durations, texts, decomposed_texts, start_index= 0, tag_step= False):
+    def Inference_Step(self, tokens, notes, singers, genres, lengths, lyrics, start_index= 0, tag_step= False):
         tokens = tokens.to(self.device, non_blocking=True)
         notes = notes.to(self.device, non_blocking=True)
-        durations = durations.to(self.device, non_blocking=True)
+        genres = genres.to(self.device, non_blocking=True)
 
         predictions = self.model(
             tokens= tokens,
-            notes= notes,
-            durations= durations
+            notes= notes
             )
 
-        audios = []
-        for prediction in predictions.transpose(2, 1):
-            if self.hp.Feature_Type == 'Mel':
-                audio = self.vocoder(prediction.unsqueeze(0)).cpu().numpy()
-            elif self.hp.Feature_Type == 'Spectrogram':
-                prediction = spectral_de_normalize_torch(prediction).cpu().numpy()
-                audio = griffinlim(prediction)
-            audios.append(audio)
-        audios = [(audio / np.abs(audio).max() * 32767.5).astype(np.int16) for audio in audios]
+        if self.hp.Feature_Type == 'Mel':
+            audios = [
+                audio[:min(length * self.hp.Sound.Frame_Shift, audio.size(0))].cpu().numpy()
+                for audio, length in zip(
+                    self.vocoder(predictions),
+                    lengths
+                    )
+                ]
+        elif self.hp.Feature_Type == 'Spectrogram':
+            audios = []
+            for feature, length in zip(
+                predictions,
+                lengths
+                ):
+                feature = spectral_de_normalize_torch(feature).cpu().numpy()
+                audio = griffinlim(feature)[:min(length * self.hp.Sound.Frame_Shift, feature.shape[0] * self.hp.Sound.Frame_Shift)]
+                audio = (audio / np.abs(audio).max() * 32767.5).astype(np.int16)
+                audios.append(audio)
 
         files = []
         for index in range(predictions.size(0)):
@@ -305,23 +396,23 @@ class Trainer:
 
         os.makedirs(os.path.join(self.hp.Inference_Path, 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)
         os.makedirs(os.path.join(self.hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV').replace('\\', '/'), exist_ok= True)
-        for index, (prediction, text, decomposed_text, audio, file) in enumerate(zip(
+        for index, (feature, length, lyric, audio, file) in enumerate(zip(
             predictions.cpu().numpy(),
-            texts,
-            decomposed_texts,
+            lengths,
+            lyrics,
             audios,
             files
             )):
-            title = 'Text: {}'.format(text if len(text) < 90 else text[:90] + '…')
-            new_Figure = plt.figure(figsize=(20, 5 * 1), dpi=100)
-            plt.subplot2grid((1, 1), (0, 0))
-            plt.imshow(prediction.T, aspect='auto', origin='lower')
+            title = 'Lyric: {}'.format(lyric if len(lyric) < 90 else lyric[:90] + '…')
+            new_figure = plt.figure(figsize=(20, 5 * 3), dpi=100)
+            ax = plt.subplot2grid((1, 1), (0, 0))
+            plt.imshow(feature[:, :length], aspect='auto', origin='lower')
             plt.title('Feature    {}'.format(title))
-            plt.colorbar()            
+            plt.colorbar(ax= ax)
             plt.tight_layout()
             plt.savefig(os.path.join(self.hp.Inference_Path, 'Step-{}'.format(self.steps), 'PNG', '{}.png'.format(file)).replace('\\', '/'))
-            plt.close(new_Figure)
-            
+            plt.close(new_figure)
+
             wavfile.write(
                 os.path.join(self.hp.Inference_Path, 'Step-{}'.format(self.steps), 'WAV', '{}.wav'.format(file)).replace('\\', '/'),
                 self.hp.Sound.Sample_Rate,
@@ -337,12 +428,12 @@ class Trainer:
         self.model.eval()
 
         batch_size = self.hp.Inference_Batch_Size or self.hp.Train.Batch_Size
-        for step, (tokens, notes, durations, texts, decomposed_texts) in tqdm(
+        for step, (tokens, notes, singers, genres, lengths, lyrics) in tqdm(
             enumerate(self.dataloader_dict['Inference']),
             desc='[Inference]',
             total= math.ceil(len(self.dataloader_dict['Inference'].dataset) / batch_size)
             ):
-            self.Inference_Step(tokens, notes, durations, texts, decomposed_texts, start_index= step * batch_size)
+            self.Inference_Step(tokens, notes, singers, genres, lengths, lyrics, start_index= step * batch_size)
 
         self.model.train()
 
@@ -374,19 +465,24 @@ class Trainer:
             return
 
         os.makedirs(self.hp.Checkpoint_Path, exist_ok= True)
-        state_Dict = {
+        state_dict = {
             'Model': self.model.state_dict(),
             'Optimizer': self.optimizer.state_dict(),
             'Scheduler': self.scheduler.state_dict(),
             'Steps': self.steps
             }
+        checkpoint_path = os.path.join(self.hp.Checkpoint_Path, 'S_{}.pt'.format(self.steps).replace('\\', '/'))
 
-        torch.save(
-            state_Dict,
-            os.path.join(self.hp.Checkpoint_Path, 'S_{}.pt'.format(self.steps).replace('\\', '/'))
-            )
+        torch.save(state_dict, checkpoint_path)
 
         logging.info('Checkpoint saved at {} steps.'.format(self.steps))
+
+        if all([
+            self.hp.Weights_and_Biases.Use,
+            self.hp.Weights_and_Biases.Save_Checkpoint.Use,
+            self.steps % self.hp.Weights_and_Biases.Save_Checkpoint.Interval == 0
+            ]):
+            wandb.save(checkpoint_path)
 
 
     def _Set_Distribution(self):

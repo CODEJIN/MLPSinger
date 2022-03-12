@@ -1,22 +1,135 @@
-from unicodedata import decimal
 import numpy as np
 import mido, os, pickle, yaml, argparse, math, librosa, hgtk
 from tqdm import tqdm
+from pysptk.sptk import rapt
 from typing import List, Tuple
 from argparse import Namespace  # for type
 import torch
 
-from meldataset import mel_spectrogram, spectrogram
+from meldataset import mel_spectrogram, spectrogram, spec_energy
 from Arg_Parser import Recursive_Parse
+
+
+def Mediazen(
+    hyper_paramters: Namespace,
+    dataset_path: str,
+    singer: str,
+    dataset: str
+    ):
+    genre_dict = {
+        line.strip().split('\t')[0]: line.strip().split('\t')[2]
+        for line in open(os.path.join(dataset_path, 'genre.txt').replace('\\', '/'), 'r', encoding='utf-8-sig').readlines()[1:]
+        }
+
+    paths = []
+    for root, _, files in os.walk(dataset_path):
+        for file in sorted(files):
+            if os.path.splitext(file)[1] != '.wav':
+                continue
+            wav_path = os.path.join(root, file).replace('\\', '/')
+            midi_path = wav_path.replace('vox', 'midi').replace('.wav', '.mid')
+
+            if not os.path.exists(midi_path):
+                raise FileExistsError(midi_path)
+
+            paths.append((wav_path, midi_path))
+
+    for index, (wav_path, midi_path) in tqdm(
+        enumerate(paths),
+        total= len(paths),
+        desc= f'{dataset}|{singer}'
+        ):
+        music_label = os.path.splitext(os.path.basename(wav_path))[0]
+        pattern_path = os.path.join(
+            hyper_paramters.Train.Train_Pattern.Path if not index == (len(paths) - 1) else hyper_paramters.Train.Eval_Pattern.Path,
+            dataset,
+            singer,
+            f'{music_label}.pickle'
+            ).replace('\\', '/')
+        if os.path.exists(pattern_path):
+            continue
+
+
+        genre = genre_dict[os.path.splitext(os.path.basename(wav_path))[0]]
+
+        mid = mido.MidiFile(midi_path, charset='CP949')
+        music = []
+        current_lyric = ''
+        current_note = None
+        current_time = 0.0
+
+        # Note on 쉼표
+        # From Lyric to message before note on: real note
+        for message in list(mid):
+            if message.type == 'note_on' and message.velocity != 0:
+                if message.time < 0.1:
+                    current_time += message.time
+                    if current_lyric in ['J', 'H', None]:
+                        music.append((current_time, '<X>', 0))
+                    else:
+                        music.append((current_time, current_lyric, current_note))
+                else:
+                    if not current_lyric in ['J', 'H', None]:
+                        music.append((current_time, current_lyric, current_note))
+                    else:
+                        message.time += current_time
+                    music.append((message.time, '<X>', 0))
+                current_time = 0.0
+                current_lyric = ''
+                current_note = None
+            elif message.type == 'lyrics':
+                if message.text == '\r':    # mzm 02678.mid
+                    continue
+                current_lyric = message.text.strip()
+                current_time += message.time
+            elif message.type == 'note_off' or (message.type == 'note_on' and message.velocity == 0):
+                current_note = message.note
+                current_time += message.time
+                if current_lyric == 'H':    # it is temp.
+                    break
+            else:
+                current_time += message.time
+
+        if current_lyric in ['J', 'H']:
+            if music[-1][1] == '<X>':
+                music[-1] = (music[-1][0] + current_time, music[-1][1], music[-1][2])
+            else:
+                music.append((current_time, '<X>', 0))
+        else:
+            music.append((current_time, current_lyric, current_note))
+        music = music[1:]
+
+        audio, _ = librosa.load(wav_path, sr= hyper_paramters.Sound.Sample_Rate)
+        if music[0][1] == '<X>':
+            audio = audio[int(music[0][0] * hyper_paramters.Sound.Sample_Rate):]
+            music = music[1:]
+        if music[-1][1] == '<X>':
+            audio = audio[:-int(music[-1][0] * hyper_paramters.Sound.Sample_Rate)]
+            music = music[:-1]
+        audio = librosa.util.normalize(audio) * 0.95
+
+        lyrics, notes = Convert_Feature_Based_Music(
+            music= music,
+            sample_rate= hyper_paramters.Sound.Sample_Rate,
+            frame_shift= hyper_paramters.Sound.Frame_Shift
+            )
+
+        Pattern_File_Generate(
+            lyric= lyrics,
+            note= notes,
+            audio= audio,
+            music_label= music_label,
+            singer= singer,
+            genre= genre,
+            dataset= dataset,
+            is_eval_music= index == (len(paths) - 1),
+            hyper_paramters= hyper_paramters
+            )
 
 def CSD(
     hyper_paramters: Namespace,
-    dataset_path: str,
-    note_step: int= 10
+    dataset_path: str
     ):
-    min_duration, max_duration = math.inf, -math.inf
-    min_note, max_note = math.inf, -math.inf
-
     paths = []
     for root, _, files in os.walk(os.path.join(dataset_path, 'wav').replace('\\', '/')):
         for file in sorted(files):
@@ -25,9 +138,29 @@ def CSD(
             wav_path = os.path.join(root, file).replace('\\', '/')
             score_path = wav_path.replace('wav', 'csv')
             lyric_path = wav_path.replace('/wav/', '/lyric/').replace('.wav', '.txt')
+            
+            if not os.path.exists(score_path):
+                raise FileExistsError(score_path)
+            elif not os.path.exists(lyric_path):
+                raise FileExistsError(lyric_path)
+
             paths.append((wav_path, score_path, lyric_path))
 
-    for index, (wav_path, score_path, lyric_path) in enumerate(paths):
+    for index, (wav_path, score_path, lyric_path) in tqdm(
+        enumerate(paths),
+        total= len(paths),
+        desc= 'CSD'
+        ):
+        music_label = os.path.splitext(os.path.basename(wav_path))[0]
+        pattern_path = os.path.join(
+            hyper_paramters.Train.Train_Pattern.Path if not index == (len(paths) - 1) else hyper_paramters.Train.Eval_Pattern.Path,
+            'CSD',
+            'CSD',
+            f'{music_label}.pickle'
+            ).replace('\\', '/')
+        if os.path.exists(pattern_path):
+            continue
+
         scores = open(score_path, encoding='utf-8-sig').readlines()[1:]
         lyrics = open(lyric_path, encoding='utf-8-sig').read().strip().replace(' ', '').replace('\n', '')
         assert len(scores) == len(lyrics), 'Different length \'{}\''.format(score_path)
@@ -50,58 +183,80 @@ def CSD(
         audio = audio[:int(previous_end_time * hyper_paramters.Sound.Sample_Rate)]  # remove last silence
         audio = librosa.util.normalize(audio) * 0.95
 
-        music = Convert_Mel_Based_Music(
+        lyrics, notes = Convert_Feature_Based_Music(
             music= music,
             sample_rate= hyper_paramters.Sound.Sample_Rate,
-            frame_shfit= hyper_paramters.Sound.Frame_Shift
+            frame_shift= hyper_paramters.Sound.Frame_Shift
             )
 
-        pattern_min_duration, pattern_max_duration = Pattern_File_Generate(
-            music= music,
+        Pattern_File_Generate(
+            lyric= lyrics,
+            note= notes,
             audio= audio,
-            note_step= note_step,
-            music_index= index,
+            music_label= os.path.splitext(os.path.basename(wav_path))[0],
             singer= 'CSD',
+            genre= 'Children',
             dataset= 'CSD',
             is_eval_music= index == (len(paths) - 1),
-            description= os.path.basename(wav_path),
             hyper_paramters= hyper_paramters
             )
-        
-        min_duration, max_duration = min(pattern_min_duration, min_duration), max(pattern_max_duration, max_duration)
-        min_note, max_note = min(list(zip(*music))[3] + (min_note,)), max(list(zip(*music))[3] + (max_note,))
 
-
-def Convert_Mel_Based_Music(
+def Convert_Feature_Based_Music(
     music: List[Tuple[float, str, int]],
     sample_rate: int,
-    frame_shfit: int
+    frame_shift: int,
+    consonant_duration: int= 3,
+    equality_duration: bool= False
     ):
     previous_used = 0
-    absolute_position = 0
-    mel_based = []
-    for x in music:
-        duration = int(x[0] * sample_rate) + previous_used
-        previous_used = duration % frame_shfit
-        duration = duration // frame_shfit
-        mel_based.append((absolute_position, duration, x[1], x[2])) # [start_point, end_point, lyric, note]
-        absolute_position += duration
+    lyrics = []
+    notes = []
+    durations = []
+    for message_time, lyric, note in music:
+        duration = round(message_time * sample_rate) + previous_used
+        previous_used = duration % frame_shift
+        duration = duration // frame_shift
 
-    return mel_based
+        if lyric == '<X>':
+            lyrics.append(lyric)
+            notes.append(note)
+            durations.append(duration)
+        else:
+            lyrics.extend(Decompose(lyric))
+            notes.extend([note] * 3)
+            if equality_duration or duration < consonant_duration * 3:
+                split_duration = [duration // 3] * 3
+                split_duration[1] += duration % 3
+                durations.extend(split_duration)
+            else:
+                durations.extend([
+                    consonant_duration,    # onset
+                    duration - consonant_duration * 2, # nucleus
+                    consonant_duration # coda
+                    ])
+
+    lyrics = sum([[lyric] * duration for lyric, duration in zip(lyrics, durations)], [])
+    notes = sum([*[[note] * duration for note, duration in zip(notes, durations)]], [])
+
+    return lyrics, notes
+
+def Decompose(syllable: str):
+    onset, nucleus, coda = hgtk.letter.decompose(syllable)
+    coda += '_'
+
+    return onset, nucleus, coda
 
 def Pattern_File_Generate(
-    music: List[Tuple[int, int, str, int]], # [start_point, end_point, lyric, note]
+    lyric: List[str],
+    note: List[int],
     audio: np.array,
-    note_step: int,
     singer: str,
+    genre: str,
     dataset: str,
-    music_index: int,
+    music_label: str,
     is_eval_music: bool,
-    description: str,
     hyper_paramters: Namespace,
     ):
-    min_duration, max_duration = math.inf, -math.inf
-
     spect = spectrogram(
         y= torch.from_numpy(audio).float().unsqueeze(0),
         n_fft= hyper_paramters.Sound.N_FFT,
@@ -121,50 +276,59 @@ def Pattern_File_Generate(
         center= False
         ).squeeze(0).T.numpy()
 
-    pattern_index = 0
-    for start_index in tqdm(range(0, len(music)), desc= description):
-        for end_index in range(start_index + 1, len(music), note_step):
-            music_sample = music[start_index:end_index]
-            sample_length = music_sample[-1][0] + music_sample[-1][1] - music_sample[0][0]
-            if sample_length < hyper_paramters.Duration.Min:
-                continue
-            elif sample_length > hyper_paramters.Duration.Max:
-                break
+    log_f0 = rapt(
+        x= audio * 32768,
+        fs= hyper_paramters.Sound.Sample_Rate,
+        hopsize= hyper_paramters.Sound.Frame_Shift,
+        min= hyper_paramters.Sound.F0_Min,
+        max= hyper_paramters.Sound.F0_Max,
+        otype= 2,   # log
+        )[:mel.shape[0]]
 
-            audio_sample = audio[music_sample[0][0] * hyper_paramters.Sound.Frame_Shift:(music_sample[-1][0] + music_sample[-1][1]) * hyper_paramters.Sound.Frame_Shift]
-            spect_sample = spect[music_sample[0][0]:music_sample[-1][0] + music_sample[-1][1]]
-            mel_sample = mel[music_sample[0][0]:music_sample[-1][0] + music_sample[-1][1]]
-            
-            _, duration_sample, text_sample, note_sample = zip(*music_sample)
+    energy = spec_energy(
+        y= torch.from_numpy(audio).float().unsqueeze(0),
+        n_fft= hyper_paramters.Sound.N_FFT,
+        hop_size= hyper_paramters.Sound.Frame_Shift,
+        win_size=hyper_paramters.Sound.Frame_Length,
+        center= False
+        ).squeeze(0).numpy()
 
-            pattern = {
-                'Audio': audio_sample.astype(np.float32),
-                'Spectrogram': spect_sample.astype(np.float32),
-                'Mel': mel_sample.astype(np.float32),
-                'Duration': duration_sample,
-                'Text': text_sample,
-                'Note': note_sample,
-                'Singer': singer,
-                'Dataset': dataset,
-                }
 
-            pattern_path = os.path.join(
-                hyper_paramters.Train.Train_Pattern.Path if not is_eval_music else hyper_paramters.Train.Eval_Pattern.Path,
-                dataset,
-                '{:03d}'.format(music_index),
-                '{}.S_{:03d}.P_{:05d}.pickle'.format(dataset, music_index, pattern_index)
-                ).replace('\\', '/')
-            os.makedirs(os.path.dirname(pattern_path), exist_ok= True)
-            pickle.dump(
-                pattern,
-                open(pattern_path, 'wb'),
-                protocol= 4
-                )
-            pattern_index += 1
+    if mel.shape[0] > len(lyric):
+        spect = spect[math.floor((spect.shape[0] - len(lyric)) / 2.0):-math.ceil((spect.shape[0] - len(lyric)) / 2.0)]
+        mel = mel[math.floor((mel.shape[0] - len(lyric)) / 2.0):-math.ceil((mel.shape[0] - len(lyric)) / 2.0)]
+        log_f0 = log_f0[math.floor((log_f0.shape[0] - len(lyric)) / 2.0):-math.ceil((log_f0.shape[0] - len(lyric)) / 2.0)]
+        energy = energy[math.floor((energy.shape[0] - len(lyric)) / 2.0):-math.ceil((energy.shape[0] - len(lyric)) / 2.0)]
+    elif len(lyric) > mel.shape[0]:
+        lyric = lyric[math.floor((len(lyric) - mel.shape[0]) / 2.0):-math.ceil((len(lyric) - mel.shape[0]) / 2.0)]
+        note = note[math.floor((len(note) - mel.shape[0]) / 2.0):-math.ceil((len(note) - mel.shape[0]) / 2.0)]
+        
+    pattern = {
+        'Audio': audio.astype(np.float32),
+        'Spectrogram': spect.astype(np.float32),
+        'Mel': mel.astype(np.float32),
+        'Log_F0': log_f0.astype(np.float32),
+        'Energy': energy.astype(np.float32),
+        'Lyric': lyric,
+        'Note': note,
+        'Singer': singer,
+        'Genre': genre,
+        'Dataset': dataset,
+        }
 
-            min_duration, max_duration = min(sample_length, min_duration), max(sample_length, max_duration)
+    pattern_path = os.path.join(
+        hyper_paramters.Train.Train_Pattern.Path if not is_eval_music else hyper_paramters.Train.Eval_Pattern.Path,
+        dataset,
+        singer,
+        f'{music_label}.pickle'
+        ).replace('\\', '/')
 
-    return min_duration, max_duration
+    os.makedirs(os.path.dirname(pattern_path), exist_ok= True)
+    pickle.dump(
+        pattern,
+        open(pattern_path, 'wb'),
+        protocol= 4
+        )
 
 
 def Token_Dict_Generate(hyper_parameters: Namespace):
@@ -186,6 +350,12 @@ def Metadata_Generate(
     pattern_path = hyper_parameters.Train.Eval_Pattern.Path if eval else hyper_parameters.Train.Train_Pattern.Path
     metadata_file = hyper_parameters.Train.Eval_Pattern.Metadata_File if eval else hyper_parameters.Train.Train_Pattern.Metadata_File
 
+    log_f0_dict = {}
+    energy_dict = {}
+    singers = []
+    genres = []
+    min_note, max_note = math.inf, -math.inf
+
     new_metadata_dict = {
         'N_FFT': hyper_parameters.Sound.N_FFT,
         'Mel_Dim': hyper_parameters.Sound.Mel_Dim,
@@ -194,19 +364,23 @@ def Metadata_Generate(
         'Sample_Rate': hyper_parameters.Sound.Sample_Rate,
         'File_List': [],
         'Audio_Length_Dict': {},
-        'Spect_Length_Dict': {},
+        'Feature_Length_Dict': {},
         'Mel_Length_Dict': {},
-        'Music_Length_Dict': {},
+        'Log_F0_Length_Dict': {},
+        'Energy_Length_Dict': {},
+        'Lyric_Length_Dict': {},
+        'Note_Length_Dict': {},
         'Singer_Dict': {},
+        'Genre_Dict': {},
         'File_List_by_Singer_Dict': {},
         }
 
     files_tqdm = tqdm(
-        total= sum([len(files) for root, _, files in os.walk(pattern_path)]),
+        total= sum([len(files) for root, _, files in os.walk(pattern_path, followlinks= True)]),
         desc= 'Eval_Pattern' if eval else 'Train_Pattern'
         )
 
-    for root, _, files in os.walk(pattern_path):
+    for root, _, files in os.walk(pattern_path, followlinks= True):
         for file in files:
             with open(os.path.join(root, file).replace("\\", "/"), "rb") as f:
                 pattern_dict = pickle.load(f)
@@ -214,40 +388,101 @@ def Metadata_Generate(
             try:
                 if not all([
                     key in pattern_dict.keys()
-                    for key in ('Audio', 'Spectrogram', 'Mel', 'Duration', 'Text', 'Note', 'Singer', 'Dataset')
+                    for key in ('Audio', 'Spectrogram', 'Mel', 'Log_F0', 'Energy', 'Lyric', 'Note', 'Singer', 'Genre', 'Dataset')
                     ]):
                     continue
                 new_metadata_dict['Audio_Length_Dict'][file] = pattern_dict['Audio'].shape[0]
-                new_metadata_dict['Spect_Length_Dict'][file] = pattern_dict['Spectrogram'].shape[0]
+                new_metadata_dict['Feature_Length_Dict'][file] = pattern_dict['Spectrogram'].shape[0]
                 new_metadata_dict['Mel_Length_Dict'][file] = pattern_dict['Mel'].shape[0]
-                new_metadata_dict['Music_Length_Dict'][file] = len(pattern_dict['Duration'])
+                new_metadata_dict['Log_F0_Length_Dict'][file] = pattern_dict['Log_F0'].shape[0]
+                new_metadata_dict['Energy_Length_Dict'][file] = pattern_dict['Energy'].shape[0]
+                new_metadata_dict['Lyric_Length_Dict'][file] = len(pattern_dict['Lyric'])
+                new_metadata_dict['Note_Length_Dict'][file] = len(pattern_dict['Note'])
                 new_metadata_dict['Singer_Dict'][file] = pattern_dict['Singer']
                 new_metadata_dict['File_List'].append(file)
                 if not pattern_dict['Singer'] in new_metadata_dict['File_List_by_Singer_Dict'].keys():
                     new_metadata_dict['File_List_by_Singer_Dict'][pattern_dict['Singer']] = []
                 new_metadata_dict['File_List_by_Singer_Dict'][pattern_dict['Singer']].append(file)
+
+                if not pattern_dict['Singer'] in log_f0_dict.keys():
+                    log_f0_dict[pattern_dict['Singer']] = []
+                if not pattern_dict['Singer'] in energy_dict.keys():
+                    energy_dict[pattern_dict['Singer']] = []
+                log_f0_dict[pattern_dict['Singer']].append(pattern_dict['Log_F0'])
+                energy_dict[pattern_dict['Singer']].append(pattern_dict['Energy'])
+                singers.append(pattern_dict['Singer'])
+                genres.append(pattern_dict['Genre'])
+
+                min_note = min(min_note, *[x for x in pattern_dict['Note'] if x > 0])
+                max_note = max(max_note, *[x for x in pattern_dict['Note'] if x > 0])
             except Exception as e:
                 print('File \'{}\' is not correct pattern file. This file is ignored. Error: {}'.format(file, e))
             files_tqdm.update(1)
+
+    new_metadata_dict['Min_Note'] = min_note
+    new_metadata_dict['Max_Note'] = max_note
 
     with open(os.path.join(pattern_path, metadata_file.upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_metadata_dict, f, protocol= 4)
 
     if not eval:
+        log_f0_info_dict = {}
+        for singer, log_f0_list in log_f0_dict.items():
+            log_f0 = np.hstack(log_f0_list)
+            log_f0 = np.clip(log_f0, -10.0, np.inf)
+            log_f0 = log_f0[log_f0 != -10.0]
+
+            log_f0_info_dict[singer] = {
+                'Mean': log_f0.mean().item(),
+                'Std': log_f0.std().item(),
+                }
         yaml.dump(
-            {singer: index for index, singer in enumerate(sorted(set(new_metadata_dict['Singer_Dict'].values())))},
+            log_f0_info_dict,
+            open(hp.Log_F0_Info_Path, 'w')
+            )
+
+        energy_info_dict = {}
+        for singer, energy_list in energy_dict.items():
+            energy = np.hstack(energy_list)            
+            energy_info_dict[singer] = {
+                'Mean': energy.mean().item(),
+                'Std': energy.std().item(),
+                }
+        yaml.dump(
+            energy_info_dict,
+            open(hp.Energy_Info_Path, 'w')
+            )
+
+        singer_index_dict = {
+            singer: index
+            for index, singer in enumerate(sorted(set(singers)))
+            }
+        yaml.dump(
+            singer_index_dict,
             open(hyper_parameters.Singer_Info_Path, 'w')
+            )
+
+        genre_index_dict = {
+            genre: index
+            for index, genre in enumerate(sorted(set(genres)))
+            }
+        yaml.dump(
+            genre_index_dict,
+            open(hyper_parameters.Genre_Info_Path, 'w')
             )
 
     print('Metadata generate done.')
 
 
 if __name__ == "__main__":
-    argParser = argparse.ArgumentParser()
-    argParser.add_argument("-csd", "--csd_path", required= True)
-    argParser.add_argument("-step", "--note_step", default= 10, type= int)
-    argParser.add_argument("-hp", "--hyper_paramters", required= True)
-    args = argParser.parse_args()
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("-nams", "--nams_path", required= False)
+    argparser.add_argument("-mzm", "--mediazen_male_path", required= False)
+    argparser.add_argument("-mzf", "--mediazen_female_path", required= False)
+    argparser.add_argument("-kje", "--kje_path", required= False)
+    argparser.add_argument("-csd", "--csd_path", required= False)
+    argparser.add_argument("-hp", "--hyper_paramters", required= True)
+    args = argparser.parse_args()
 
     hp = Recursive_Parse(yaml.load(
         open(args.hyper_paramters, encoding='utf-8'),
@@ -255,12 +490,41 @@ if __name__ == "__main__":
         ))
 
     Token_Dict_Generate(hyper_parameters= hp)
-    CSD(
-        hyper_paramters= hp,
-        dataset_path= args.csd_path,
-        note_step= args.note_step
-        )
+    # if args.nams_path:
+    #     Mediazen(
+    #         hyper_paramters= hp,
+    #         dataset_path= args.nams_path,
+    #         singer= 'NAMS',
+    #         dataset= 'NAMS'
+    #         )
+    # if args.mediazen_male_path:
+    #     Mediazen(
+    #         hyper_paramters= hp,
+    #         dataset_path= args.mediazen_male_path,
+    #         singer= 'Mediazen_Male',
+    #         dataset= 'Mediazen'
+    #         )
+    # if args.mediazen_female_path:
+    #     Mediazen(
+    #         hyper_paramters= hp,
+    #         dataset_path= args.mediazen_female_path,
+    #         singer= 'Mediazen_Female',
+    #         dataset= 'Mediazen'
+    #         )
+    # if args.kje_path:
+    #     Mediazen(
+    #         hyper_paramters= hp,
+    #         dataset_path= args.kje_path,
+    #         singer= 'KJE',
+    #         dataset= 'Mediazen'
+    #         )
+    # if args.csd_path:
+    #     CSD(
+    #         hyper_paramters= hp,
+    #         dataset_path= args.csd_path
+    #         )
     Metadata_Generate(hp, False)
     Metadata_Generate(hp, True)
 
-# python Pattern_Generator.py -hp Hyper_Parameters.yaml -csd "E:/Pattern/Sing/CSD/korean"
+# python Pattern_Generator_SVS.py -hp Hyper_Parameters_SVS.yaml -mzf E:/Pattern/Sing/Mediazen/mzf
+# python Pattern_Generator.py -hp Hyper_Parameters.yaml -mzf E:/Pattern/Sing/Mediazen/mzf -mzm E:/Pattern/Sing/Mediazen/mzm -kje E:/Pattern/Sing/Mediazen/KJE -nams E:/Pattern/Sing/Nams -csd E:/Pattern/Sing/CSD/korean

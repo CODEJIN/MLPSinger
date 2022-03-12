@@ -115,6 +115,24 @@ def spectrogram(y, n_fft, hop_size, win_size, center=False):
 
     return spec
 
+def spec_energy(y, n_fft, hop_size, win_size, center=False):
+    if torch.min(y) < -1.:
+        print('min value is ', torch.min(y))
+    if torch.max(y) > 1.:
+        print('max value is ', torch.max(y))
+
+    global hann_window
+    hann_window[str(y.device)] = torch.hann_window(win_size).to(y.device)
+
+    y = torch.nn.functional.pad(y.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+    y = y.squeeze(1)
+
+    spec = torch.stft(y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window[str(y.device)],
+                      center=center, pad_mode='reflect', normalized=False, onesided=True)
+    spec = torch.sqrt(spec.pow(2).sum(-1)+(1e-9))
+    energy = torch.norm(spec, dim= 1)
+
+    return energy
 
 def get_dataset_filelist(a):
     with open(a.input_training_file, 'r', encoding='utf-8') as fi:

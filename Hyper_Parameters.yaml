@@ -6,63 +6,89 @@ Sound:
     Sample_Rate: 22050
     Mel_F_Min: 0
     Mel_F_Max: 8000
+    F0_Min: 50
+    F0_Max: 880
+
+Feature_Type: 'Mel' #'Spectrogram', 'Mel'
 
 Tokens: 77
-Max_Note: 100
-
+Notes: 128
+Genres: 9
 Duration:
-    Min: 600
-    Max: 1200
     Equality: False
     Consonant_Duration: 3   # This is only used when Equality is False.
-
-Feature_Type: 'Spectrogram'
 
 Encoder:
     Token_Size: 512
     Note_Size: 64
 
 Mixer:
+    Pattern_Length: 192
     Stack: 16
     Dropout_Rate: 0.5
 
-Token_Path: 'E:/22K.Music/Token.yaml' # '/data/22K.Music/Token.yaml'
-Singer_Info_Path: 'E:/22K.Music/Singer.yaml' #'/data/22K.Music/Singer.yaml'
+Token_Path: 'E:/22K.Music/Token.yaml'
+Log_F0_Info_Path: 'E:/22K.Music/Log_F0_Info.yaml'
+Energy_Info_Path: 'E:/22K.Music/Energy_Info.yaml'
+Singer_Info_Path: 'E:/22K.Music/Singer_Info.yaml'
+Genre_Info_Path: 'E:/22K.Music/Genre_Info.yaml'
 Train:
+    Use_Pattern_Cache: true
     Train_Pattern:
-        Path: 'E:/22K.Music/Train' # '/data/22K.Music/Train'
+        Path: 'E:/22K.Music/Train'
         Metadata_File: 'METADATA.PICKLE'
+        Accumulated_Dataset_Epoch: 1000   # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
+        Augmentation_Ratio: 0.0
     Eval_Pattern:
-        Path: 'E:/22K.Music/Eval' # '/data/22K.Music/Eval'
+        Path: 'E:/22K.Music/Eval'
         Metadata_File: 'METADATA.PICKLE'
+        Accumulated_Dataset_Epoch: 32   # When singer is 1, evaluation pattern is also 1. Because offset is selected randomly, this is meaningful.
     Num_Workers: 2
-    Batch_Size: 48
+    Batch_Size: 64
     Learning_Rate:
         Initial: 1.0e-3
         Base: 4000
+    Pattern_Length: 192 # In MLP Singer, this must be same to the Mixer.Pattern_Length.
     ADAM:
         Beta1: 0.9
         Beta2: 0.999
         Epsilon: 1.0e-7
     Weight_Decay: 1.0e-6
     Gradient_Norm: 1.0
-    Max_Step: 100000
+    Discriminator_Lambda: 1.0
+    Max_Step: 200000
     Checkpoint_Save_Interval: 1000
     Logging_Interval: 1
     Evaluation_Interval: 100
     Inference_Interval: 1000
     Initial_Inference: true
     Inference_Pattern_in_Train: [
-        './Inference_for_Training/Example1.txt',
-        './Inference_for_Training/Example2.txt',
-        './Inference_for_Training/Example3.txt',
+        './Music_Inference_Example/Example_0.txt',
+        './Music_Inference_Example/Example_1.txt',        
+        ]
+    Inference_Singer_in_Train: [
+        'Mediazen_Female',
+        'Mediazen_Female',
+        ]
+    Inference_Genre_in_Train: [
+        'Anime',
+        'Ballade',
         ]
 
-Inference_Batch_Size: 16
-Inference_Path: '/data/results/MLPSinger/Inference'
-Checkpoint_Path: '/data/results/MLPSinger/Checkpoint'
-Log_Path: '/data/results/MLPSinger/Log'
+Inference_Batch_Size: 256
+Inference_Path: './results/Inference'
+Checkpoint_Path: './results/Checkpoint'
+Log_Path: './results/Log'
 
-Use_Mixed_Precision: true
-Use_Multi_GPU: true
-Device: '0,1,2,3,4,5,6,7'
+Weights_and_Biases:
+    Use: true
+    Project: 'mlpsinger'
+    Entity: 'codejin'
+    Name: 'MFZ'
+    Save_Checkpoint:
+        Use: true
+        Interval: 50000 # Unlike local, The capacity of WandB is small.
+
+Use_Mixed_Precision: false # false
+Use_Multi_GPU: false # true
+Device: '0' # '4,5,6,7'

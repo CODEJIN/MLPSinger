@@ -7,7 +7,7 @@ from typing import List, Dict, Tuple
 from librosa import griffinlim
 from scipy.io import wavfile
 
-from Modules import MLPSinger
+from Modules.Modules import MLPSinger
 from Datasets import Inference_Dataset, Inference_Collater
 from Radam import RAdam
 from Noam_Scheduler import Modified_Noam_Scheduler

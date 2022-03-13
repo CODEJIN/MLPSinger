@@ -21,6 +21,7 @@ Duration:
 Encoder:
     Token_Size: 512
     Note_Size: 64
+    Genre_Size: 32
 
 Mixer:
     Pattern_Length: 256
@@ -81,7 +82,7 @@ Checkpoint_Path: './results/Checkpoint'
 Log_Path: './results/Log'
 
 Weights_and_Biases:
-    Use: true
+    Use: false
     Project: 'mlpsinger'
     Entity: 'codejin'
     Name: 'MFZ'

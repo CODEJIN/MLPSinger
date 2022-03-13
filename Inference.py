@@ -188,8 +188,8 @@ class Inferencer:
                 ):                
                 audio = griffinlim(
                     spectral_de_normalize_torch(feature).cpu().numpy(),
-                    hop_length= 256,
-                    win_length= 1024,
+                    hop_length= self.hp.Sound.Frame_Shift,
+                    win_length= self.hp.Sound.Frame_Length,
                     center= False
                     )
                 audio = audio[:min(length * self.hp.Sound.Frame_Shift, audio.shape[0])]

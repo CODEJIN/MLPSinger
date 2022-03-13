@@ -195,12 +195,14 @@ class Trainer:
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
         notes = notes.to(self.device, non_blocking=True)
+        genres = genres.to(self.device, non_blocking=True)
         features = features.to(self.device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled= self.hp.Use_Mixed_Precision):
             predictions = self.model(
                 tokens= tokens,
-                notes= notes
+                notes= notes,
+                genres= genres
                 )
 
             loss_dict['Loss'] = self.criterion(predictions, features)
@@ -264,11 +266,13 @@ class Trainer:
         loss_dict = {}
         tokens = tokens.to(self.device, non_blocking=True)
         notes = notes.to(self.device, non_blocking=True)
+        genres = genres.to(self.device, non_blocking=True)
         features = features.to(self.device, non_blocking=True)
 
         predictions = self.model(
             tokens= tokens,
-            notes= notes
+            notes= notes,
+            genres= genres
             )
 
         loss_dict['Loss'] = self.criterion(predictions, features)
@@ -365,7 +369,8 @@ class Trainer:
 
         predictions = self.model(
             tokens= tokens,
-            notes= notes
+            notes= notes,
+            genres= genres
             )
         predictions = (predictions + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129
 

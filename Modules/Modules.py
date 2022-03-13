@@ -10,7 +10,7 @@ class MLPSinger(torch.nn.Module):
         super().__init__()
         self.hp = hyper_parameters
 
-        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size
+        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size + self.hp.Encoder.Genre_Size
         
         if self.hp.Feature_Type == 'Spectrogram':
             feature_size = self.hp.Sound.N_FFT // 2 + 1
@@ -43,9 +43,10 @@ class MLPSinger(torch.nn.Module):
     def forward(
         self,
         tokens: torch.LongTensor,
-        notes: torch.LongTensor
+        notes: torch.LongTensor,
+        genres: torch.LongTensor,
         ):
-        x = self.encoder(tokens, notes)
+        x = self.encoder(tokens, notes, genres)
         x = self.mixer_blocks(x)
         x = self.projection(x)
 
@@ -55,7 +56,7 @@ class Encoder(torch.nn.Module):
     def __init__(self, hyper_parameters: Namespace):
         super().__init__()
         self.hp = hyper_parameters
-        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size
+        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size + self.hp.Encoder.Genre_Size
 
         self.token_embedding = torch.nn.Embedding(
             num_embeddings= self.hp.Tokens,
@@ -64,6 +65,10 @@ class Encoder(torch.nn.Module):
         self.note_embedding = torch.nn.Embedding(
             num_embeddings= self.hp.Notes,
             embedding_dim= self.hp.Encoder.Note_Size,
+            )
+        self.gener_embedding = torch.nn.Embedding(
+            num_embeddings= self.hp.Genres,
+            embedding_dim= self.hp.Encoder.Genre_Size,
             )
         self.linear = Linear(
             in_features= encoding_size,
@@ -74,15 +79,18 @@ class Encoder(torch.nn.Module):
     def forward(
         self,
         tokens: torch.Tensor,
-        notes: torch.Tensor        
+        notes: torch.Tensor,
+        genres: torch.Tensor,
         ):
         '''
         tokens: [Batch, Time]
         notes: [Batch, Time]
+        genres: [Batch]
         '''
         x = torch.cat([
             self.token_embedding(tokens),
-            self.note_embedding(notes)
+            self.note_embedding(notes),
+            self.gener_embedding(genres).unsqueeze(1).expand(-1, tokens.size(1), -1),
             ], dim= 2)
 
         x = self.linear(x)

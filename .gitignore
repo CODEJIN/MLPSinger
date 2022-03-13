@@ -2,3 +2,6 @@
 Pattern_Generator_SG.py
 S_13000.pt
 .ipynb_checkpoints
+wandb
+results
+vocgan_sing_mzf_22k_403.pts

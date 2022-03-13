@@ -23,7 +23,7 @@ Encoder:
     Note_Size: 64
 
 Mixer:
-    Pattern_Length: 192
+    Pattern_Length: 256
     Stack: 16
     Dropout_Rate: 0.5
 
@@ -48,7 +48,7 @@ Train:
     Learning_Rate:
         Initial: 1.0e-3
         Base: 4000
-    Pattern_Length: 192 # In MLP Singer, this must be same to the Mixer.Pattern_Length.
+    Pattern_Length: 256 # In MLP Singer, this must be same to the Mixer.Pattern_Length.
     ADAM:
         Beta1: 0.9
         Beta2: 0.999

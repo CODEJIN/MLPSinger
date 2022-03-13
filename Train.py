@@ -367,6 +367,7 @@ class Trainer:
             tokens= tokens,
             notes= notes
             )
+        predictions = (predictions + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129
 
         if self.hp.Feature_Type == 'Mel':
             audios = [

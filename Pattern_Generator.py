@@ -39,6 +39,16 @@ def Mediazen(
         total= len(paths),
         desc= f'{dataset}|{singer}'
         ):
+        music_label = os.path.splitext(os.path.basename(wav_path))[0]
+        pattern_path = os.path.join(
+            hyper_paramters.Train.Train_Pattern.Path if not index == (len(paths) - 1) else hyper_paramters.Train.Eval_Pattern.Path,
+            dataset,
+            singer,
+            f'{music_label}.pickle'
+            ).replace('\\', '/')
+        if os.path.exists(pattern_path):
+            continue
+
         genre = genre_dict[os.path.splitext(os.path.basename(wav_path))[0]]
 
         mid = mido.MidiFile(midi_path, charset='CP949')
@@ -67,6 +77,8 @@ def Mediazen(
                 current_lyric = ''
                 current_note = None
             elif message.type == 'lyrics':
+                if message.text == '\r':    # mzm 02678.mid
+                    continue
                 current_lyric = message.text.strip()
                 current_time += message.time
             elif message.type == 'note_off' or (message.type == 'note_on' and message.velocity == 0):
@@ -105,7 +117,7 @@ def Mediazen(
             lyric= lyrics,
             note= notes,
             audio= audio,
-            music_label= os.path.splitext(os.path.basename(wav_path))[0],
+            music_label= music_label,
             singer= singer,
             genre= genre,
             dataset= dataset,
@@ -138,6 +150,15 @@ def CSD(
         total= len(paths),
         desc= 'CSD'
         ):
+        music_label = os.path.splitext(os.path.basename(wav_path))[0]
+        pattern_path = os.path.join(
+            hyper_paramters.Train.Train_Pattern.Path if not index == (len(paths) - 1) else hyper_paramters.Train.Eval_Pattern.Path,
+            'CSD',
+            'CSD',
+            f'{music_label}.pickle'
+            ).replace('\\', '/')
+        if os.path.exists(pattern_path):
+            continue
         scores = open(score_path, encoding='utf-8-sig').readlines()[1:]
         lyrics = open(lyric_path, encoding='utf-8-sig').read().strip().replace(' ', '').replace('\n', '')
         assert len(scores) == len(lyrics), 'Different length \'{}\''.format(score_path)
@@ -217,7 +238,7 @@ def Convert_Feature_Based_Music(
 
     return lyrics, notes
 
-def Decompose(syllable: str):    
+def Decompose(syllable: str):
     onset, nucleus, coda = hgtk.letter.decompose(syllable)
     coda += '_'
 

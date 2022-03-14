@@ -35,10 +35,10 @@ def Note_Stack(notes: List[List[int]], max_length: Optional[int]= None):
         )
     return notes
 
-def Feature_Stack(features: List[np.array], max_length: Optional[int]= None):
+def Feature_Stack(features: List[np.array], padding_value: float, max_length: Optional[int]= None):
     max_feature_length = max_length or max([feature.shape[0] for feature in features])
     features = np.stack(
-        [np.pad(feature, [[0, max_feature_length - feature.shape[0]], [0, 0]], constant_values= -11.5129) for feature in features],
+        [np.pad(feature, [[0, max_feature_length - feature.shape[0]], [0, 0]], constant_values= padding_value) for feature in features],
         axis= 0
         )
     return features
@@ -177,9 +177,13 @@ class Collater:
     def __init__(
         self,
         token_dict: Dict[str, int],
+        feature_min: float,
+        feature_max: float,
         pattern_length: int
         ):
         self.token_dict = token_dict
+        self.feature_min = feature_min
+        self.feature_max = feature_max
         self.pattern_length = pattern_length
 
     def __call__(self, batch):
@@ -212,9 +216,9 @@ class Collater:
         features = Feature_Stack([
             feature[offset:offset+self.pattern_length]
             for feature, offset in zip(features, offsets)
-            ])
+            ], self.feature_min)
         
-        features = (features + 11.5129) / (2.0957 + 11.5129) * 2.0 - 1.0
+        features = (features - self.feature_min) / (self.feature_max - self.feature_min) * 2.0 - 1.0
 
         tokens = torch.LongTensor(tokens)   # [Batch, Featpure_t]
         notes = torch.LongTensor(notes) # [Batch, Featpure_t]

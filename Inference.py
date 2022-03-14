@@ -115,6 +115,13 @@ class Inferencer:
         if self.hp.Feature_Type == 'Mel':
             self.vocoder = torch.jit.load('vocgan_sing_mzf_22k_403.pts', map_location='cpu').to(self.device)
 
+        if self.hp.Feature_Type == 'Spectrogram':
+            feature_range_info_dict = yaml.load(open(self.hp.Spectrogram_Range_Info_Path), Loader=yaml.Loader)
+        if self.hp.Feature_Type == 'Mel':
+            feature_range_info_dict = yaml.load(open(self.hp.Mel_Range_Info_Path), Loader=yaml.Loader)
+        self.feature_min = min([feature_range['Min'] for feature_range in feature_range_info_dict.values()])
+        self.feature_max = max([feature_range['Max'] for feature_range in feature_range_info_dict.values()])
+
         self.Load_Checkpoint(checkpoint_path)
         self.out_path = out_path
         self.batch_size = batch_size
@@ -170,7 +177,7 @@ class Inferencer:
                 )
             for index in range(0, lengths.max(), self.hp.Train.Pattern_Length)
             ], dim= 2)
-        predictions = (predictions + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129
+        predictions = (predictions + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min
         
         if self.hp.Feature_Type == 'Mel':
             audios = self.vocoder(predictions)

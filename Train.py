@@ -88,6 +88,13 @@ class Trainer:
         singer_info_dict = yaml.load(open(self.hp.Singer_Info_Path), Loader=yaml.Loader)
         genre_info_dict = yaml.load(open(self.hp.Genre_Info_Path), Loader=yaml.Loader)
 
+        if self.hp.Feature_Type == 'Spectrogram':
+            feature_range_info_dict = yaml.load(open(self.hp.Spectrogram_Range_Info_Path), Loader=yaml.Loader)
+        if self.hp.Feature_Type == 'Mel':
+            feature_range_info_dict = yaml.load(open(self.hp.Mel_Range_Info_Path), Loader=yaml.Loader)
+        self.feature_min = min([feature_range['Min'] for feature_range in feature_range_info_dict.values()])
+        self.feature_max = max([feature_range['Max'] for feature_range in feature_range_info_dict.values()])
+
         train_dataset = Dataset(
             token_dict= token_dict,
             log_f0_info_dict= log_f0_info_dict,
@@ -131,6 +138,8 @@ class Trainer:
 
         collater = Collater(
             token_dict= token_dict,
+            feature_min= self.feature_min,
+            feature_max= self.feature_max,
             pattern_length= self.hp.Train.Pattern_Length
             )
         inference_collater = Inference_Collater(
@@ -307,14 +316,14 @@ class Trainer:
                         
             if self.hp.Feature_Type == 'Mel':
                 feature_audio = self.vocoder(
-                    ((features[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).unsqueeze(0).to(self.device)
+                    ((features[index] + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min).unsqueeze(0).to(self.device)
                     ).squeeze(0).cpu().numpy() / 32768.0
                 prediction_audio = self.vocoder(
-                    ((predictions[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).unsqueeze(0).to(self.device)
+                    ((predictions[index] + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min).unsqueeze(0).to(self.device)
                     ).squeeze(0).cpu().numpy() / 32768.0
             elif self.hp.Feature_Type == 'Spectrogram':
-                feature_audio = griffinlim(spectral_de_normalize_torch((features[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).cpu().numpy())
-                prediction_audio = griffinlim(spectral_de_normalize_torch((predictions[index] + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129).cpu().numpy())
+                feature_audio = griffinlim(spectral_de_normalize_torch((features[index] + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min).cpu().numpy())
+                prediction_audio = griffinlim(spectral_de_normalize_torch((predictions[index] + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min).cpu().numpy())
 
             image_dict = {
                 'Feature/Target': (features[index].cpu().numpy(), None, 'auto', None),
@@ -372,7 +381,7 @@ class Trainer:
             notes= notes,
             genres= genres
             )
-        predictions = (predictions + 1.0) / 2.0 * (2.0957 + 11.5129) - 11.5129
+        predictions = (predictions + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min
 
         if self.hp.Feature_Type == 'Mel':
             audios = [

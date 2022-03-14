@@ -29,6 +29,8 @@ Mixer:
     Dropout_Rate: 0.5
 
 Token_Path: 'E:/22K.Music/Token.yaml'
+Spectrogram_Range_Info_Path: 'E:/22K.Music/Spectrogram_Range_Info.yaml'
+Mel_Range_Info_Path: 'E:/22K.Music/Mel_Range_Info.yaml'
 Log_F0_Info_Path: 'E:/22K.Music/Log_F0_Info.yaml'
 Energy_Info_Path: 'E:/22K.Music/Energy_Info.yaml'
 Singer_Info_Path: 'E:/22K.Music/Singer_Info.yaml'

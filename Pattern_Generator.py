@@ -39,17 +39,6 @@ def Mediazen(
         total= len(paths),
         desc= f'{dataset}|{singer}'
         ):
-        music_label = os.path.splitext(os.path.basename(wav_path))[0]
-        pattern_path = os.path.join(
-            hyper_paramters.Train.Train_Pattern.Path if not index == (len(paths) - 1) else hyper_paramters.Train.Eval_Pattern.Path,
-            dataset,
-            singer,
-            f'{music_label}.pickle'
-            ).replace('\\', '/')
-        if os.path.exists(pattern_path):
-            continue
-
-
         genre = genre_dict[os.path.splitext(os.path.basename(wav_path))[0]]
 
         mid = mido.MidiFile(midi_path, charset='CP949')
@@ -78,8 +67,6 @@ def Mediazen(
                 current_lyric = ''
                 current_note = None
             elif message.type == 'lyrics':
-                if message.text == '\r':    # mzm 02678.mid
-                    continue
                 current_lyric = message.text.strip()
                 current_time += message.time
             elif message.type == 'note_off' or (message.type == 'note_on' and message.velocity == 0):
@@ -118,7 +105,7 @@ def Mediazen(
             lyric= lyrics,
             note= notes,
             audio= audio,
-            music_label= music_label,
+            music_label= os.path.splitext(os.path.basename(wav_path))[0],
             singer= singer,
             genre= genre,
             dataset= dataset,
@@ -151,16 +138,6 @@ def CSD(
         total= len(paths),
         desc= 'CSD'
         ):
-        music_label = os.path.splitext(os.path.basename(wav_path))[0]
-        pattern_path = os.path.join(
-            hyper_paramters.Train.Train_Pattern.Path if not index == (len(paths) - 1) else hyper_paramters.Train.Eval_Pattern.Path,
-            'CSD',
-            'CSD',
-            f'{music_label}.pickle'
-            ).replace('\\', '/')
-        if os.path.exists(pattern_path):
-            continue
-
         scores = open(score_path, encoding='utf-8-sig').readlines()[1:]
         lyrics = open(lyric_path, encoding='utf-8-sig').read().strip().replace(' ', '').replace('\n', '')
         assert len(scores) == len(lyrics), 'Different length \'{}\''.format(score_path)
@@ -240,7 +217,7 @@ def Convert_Feature_Based_Music(
 
     return lyrics, notes
 
-def Decompose(syllable: str):
+def Decompose(syllable: str):    
     onset, nucleus, coda = hgtk.letter.decompose(syllable)
     coda += '_'
 
@@ -350,6 +327,8 @@ def Metadata_Generate(
     pattern_path = hyper_parameters.Train.Eval_Pattern.Path if eval else hyper_parameters.Train.Train_Pattern.Path
     metadata_file = hyper_parameters.Train.Eval_Pattern.Metadata_File if eval else hyper_parameters.Train.Train_Pattern.Metadata_File
 
+    spectrogram_range_dict = {}
+    mel_range_dict = {}
     log_f0_dict = {}
     energy_dict = {}
     singers = []
@@ -404,10 +383,20 @@ def Metadata_Generate(
                     new_metadata_dict['File_List_by_Singer_Dict'][pattern_dict['Singer']] = []
                 new_metadata_dict['File_List_by_Singer_Dict'][pattern_dict['Singer']].append(file)
 
+                if not pattern_dict['Singer'] in spectrogram_range_dict.keys():
+                    spectrogram_range_dict[pattern_dict['Singer']] = {'Min': math.inf, 'Max': -math.inf}
+                if not pattern_dict['Singer'] in mel_range_dict.keys():
+                    mel_range_dict[pattern_dict['Singer']] = {'Min': math.inf, 'Max': -math.inf}
                 if not pattern_dict['Singer'] in log_f0_dict.keys():
                     log_f0_dict[pattern_dict['Singer']] = []
                 if not pattern_dict['Singer'] in energy_dict.keys():
                     energy_dict[pattern_dict['Singer']] = []
+                
+                spectrogram_range_dict[pattern_dict['Singer']]['Min'] = min(spectrogram_range_dict[pattern_dict['Singer']]['Min'], pattern_dict['Spectrogram'].min().item())
+                spectrogram_range_dict[pattern_dict['Singer']]['Max'] = max(spectrogram_range_dict[pattern_dict['Singer']]['Max'], pattern_dict['Spectrogram'].max().item())
+                mel_range_dict[pattern_dict['Singer']]['Min'] = min(mel_range_dict[pattern_dict['Singer']]['Min'], pattern_dict['Spectrogram'].min().item())
+                mel_range_dict[pattern_dict['Singer']]['Max'] = max(mel_range_dict[pattern_dict['Singer']]['Max'], pattern_dict['Spectrogram'].max().item())
+                
                 log_f0_dict[pattern_dict['Singer']].append(pattern_dict['Log_F0'])
                 energy_dict[pattern_dict['Singer']].append(pattern_dict['Energy'])
                 singers.append(pattern_dict['Singer'])
@@ -426,6 +415,15 @@ def Metadata_Generate(
         pickle.dump(new_metadata_dict, f, protocol= 4)
 
     if not eval:
+        yaml.dump(
+            spectrogram_range_dict,
+            open(hp.Spectrogram_Range_Info_Path, 'w')
+            )
+        yaml.dump(
+            mel_range_dict,
+            open(hp.Mel_Range_Info_Path, 'w')
+            )
+        
         log_f0_info_dict = {}
         for singer, log_f0_list in log_f0_dict.items():
             log_f0 = np.hstack(log_f0_list)
@@ -490,41 +488,40 @@ if __name__ == "__main__":
         ))
 
     Token_Dict_Generate(hyper_parameters= hp)
-    # if args.nams_path:
-    #     Mediazen(
-    #         hyper_paramters= hp,
-    #         dataset_path= args.nams_path,
-    #         singer= 'NAMS',
-    #         dataset= 'NAMS'
-    #         )
-    # if args.mediazen_male_path:
-    #     Mediazen(
-    #         hyper_paramters= hp,
-    #         dataset_path= args.mediazen_male_path,
-    #         singer= 'Mediazen_Male',
-    #         dataset= 'Mediazen'
-    #         )
-    # if args.mediazen_female_path:
-    #     Mediazen(
-    #         hyper_paramters= hp,
-    #         dataset_path= args.mediazen_female_path,
-    #         singer= 'Mediazen_Female',
-    #         dataset= 'Mediazen'
-    #         )
-    # if args.kje_path:
-    #     Mediazen(
-    #         hyper_paramters= hp,
-    #         dataset_path= args.kje_path,
-    #         singer= 'KJE',
-    #         dataset= 'Mediazen'
-    #         )
-    # if args.csd_path:
-    #     CSD(
-    #         hyper_paramters= hp,
-    #         dataset_path= args.csd_path
-    #         )
+    if args.nams_path:
+        Mediazen(
+            hyper_paramters= hp,
+            dataset_path= args.nams_path,
+            singer= 'NAMS',
+            dataset= 'NAMS'
+            )
+    if args.mediazen_male_path:
+        Mediazen(
+            hyper_paramters= hp,
+            dataset_path= args.mediazen_male_path,
+            singer= 'Mediazen_Male',
+            dataset= 'Mediazen'
+            )
+    if args.mediazen_female_path:
+        Mediazen(
+            hyper_paramters= hp,
+            dataset_path= args.mediazen_female_path,
+            singer= 'Mediazen_Female',
+            dataset= 'Mediazen'
+            )
+    if args.kje_path:
+        Mediazen(
+            hyper_paramters= hp,
+            dataset_path= args.kje_path,
+            singer= 'KJE',
+            dataset= 'Mediazen'
+            )
+    if args.csd_path:
+        CSD(
+            hyper_paramters= hp,
+            dataset_path= args.csd_path
+            )
     Metadata_Generate(hp, False)
     Metadata_Generate(hp, True)
 
-# python Pattern_Generator_SVS.py -hp Hyper_Parameters_SVS.yaml -mzf E:/Pattern/Sing/Mediazen/mzf
 # python Pattern_Generator.py -hp Hyper_Parameters.yaml -mzf E:/Pattern/Sing/Mediazen/mzf -mzm E:/Pattern/Sing/Mediazen/mzm -kje E:/Pattern/Sing/Mediazen/KJE -nams E:/Pattern/Sing/Nams -csd E:/Pattern/Sing/CSD/korean

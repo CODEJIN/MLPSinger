@@ -211,7 +211,8 @@ class Trainer:
             predictions = self.model(
                 tokens= tokens,
                 notes= notes,
-                genres= genres
+                genres= genres,
+                singers= singers
                 )
 
             loss_dict['Loss'] = self.criterion(predictions, features)
@@ -281,7 +282,8 @@ class Trainer:
         predictions = self.model(
             tokens= tokens,
             notes= notes,
-            genres= genres
+            genres= genres,
+            singers= singers
             )
 
         loss_dict['Loss'] = self.criterion(predictions, features)
@@ -379,7 +381,8 @@ class Trainer:
         predictions = self.model(
             tokens= tokens,
             notes= notes,
-            genres= genres
+            genres= genres,
+            singers= singers
             )
         predictions = (predictions + 1.0) / 2.0 * (self.feature_max - self.feature_min) + self.feature_min
 

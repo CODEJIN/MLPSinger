@@ -14,6 +14,7 @@ Feature_Type: 'Mel' #'Spectrogram', 'Mel'
 Tokens: 77
 Notes: 128
 Genres: 9
+Singers: 5
 Duration:
     Equality: False
     Consonant_Duration: 3   # This is only used when Equality is False.
@@ -22,6 +23,7 @@ Encoder:
     Token_Size: 512
     Note_Size: 64
     Genre_Size: 32
+    Singer_Size: 32
 
 Mixer:
     Pattern_Length: 256

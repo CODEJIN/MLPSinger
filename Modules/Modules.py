@@ -10,7 +10,7 @@ class MLPSinger(torch.nn.Module):
         super().__init__()
         self.hp = hyper_parameters
 
-        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size + self.hp.Encoder.Genre_Size
+        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size + self.hp.Encoder.Genre_Size + self.hp.Encoder.Singer_Size
         
         if self.hp.Feature_Type == 'Spectrogram':
             feature_size = self.hp.Sound.N_FFT // 2 + 1
@@ -45,8 +45,9 @@ class MLPSinger(torch.nn.Module):
         tokens: torch.LongTensor,
         notes: torch.LongTensor,
         genres: torch.LongTensor,
+        singers: torch.LongTensor,
         ):
-        x = self.encoder(tokens, notes, genres)
+        x = self.encoder(tokens, notes, genres, singers)
         x = self.mixer_blocks(x)
         x = self.projection(x)
 
@@ -56,7 +57,7 @@ class Encoder(torch.nn.Module):
     def __init__(self, hyper_parameters: Namespace):
         super().__init__()
         self.hp = hyper_parameters
-        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size + self.hp.Encoder.Genre_Size
+        encoding_size = self.hp.Encoder.Token_Size + self.hp.Encoder.Note_Size + self.hp.Encoder.Genre_Size + self.hp.Encoder.Singer_Size
 
         self.token_embedding = torch.nn.Embedding(
             num_embeddings= self.hp.Tokens,
@@ -70,6 +71,10 @@ class Encoder(torch.nn.Module):
             num_embeddings= self.hp.Genres,
             embedding_dim= self.hp.Encoder.Genre_Size,
             )
+        self.singer_embedding = torch.nn.Embedding(
+            num_embeddings= self.hp.Singers,
+            embedding_dim= self.hp.Encoder.Singer_Size,
+            )
         self.linear = Linear(
             in_features= encoding_size,
             out_features= encoding_size,
@@ -81,6 +86,7 @@ class Encoder(torch.nn.Module):
         tokens: torch.Tensor,
         notes: torch.Tensor,
         genres: torch.Tensor,
+        singers: torch.Tensor,
         ):
         '''
         tokens: [Batch, Time]
@@ -91,6 +97,7 @@ class Encoder(torch.nn.Module):
             self.token_embedding(tokens),
             self.note_embedding(notes),
             self.gener_embedding(genres).unsqueeze(1).expand(-1, tokens.size(1), -1),
+            self.singer_embedding(singers).unsqueeze(1).expand(-1, tokens.size(1), -1),
             ], dim= 2)
 
         x = self.linear(x)
